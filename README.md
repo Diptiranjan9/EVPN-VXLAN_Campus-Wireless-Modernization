@@ -108,7 +108,7 @@ Traditional `VLAN-based` solutions for wireless networks come with several limit
 
 ## EVPN-VXLAN Lab:
 
-![Diagram](https://github.com/Diptiranjan9/EVPN-VXLAN_Campus-Wireless-Modernization/blob/main/snapshots/Evpn-Vxlan-Lab-Diagram.png)
+![Diagram]()
 
 In this lab, I have configured a small network setup using two core switches in a stack and two leaf switches. The configuration files for this setup are included in the repository. In this design, the spine switches also act as the border switches, making it suitable for smaller networks. For larger setups, you can designate one of the border leaf switches as a dedicated border switch and avoid stacking both spine switches. 
 
