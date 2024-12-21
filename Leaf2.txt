@@ -1,0 +1,205 @@
+hostname Leaf2
+!
+!Step-1:- Build Underlay (Connectivity Between Spine and Leaf with OSPF)
+
+interface Loopback0
+ ip address 172.28.88.4 255.255.255.255
+ ip ospf 1 area 0
+ description "Used-For-BGPNeighbor-and-NveInterface"
+!
+interface Ethernet0/1
+ no switchport
+ ip address 172.28.87.10 255.255.255.252
+ ip ospf network point-to-point
+ ip ospf 1 area 0
+ description "Connected-To-ActiveSpine"
+!
+interface Ethernet0/2
+ no switchport
+ ip address 172.28.87.14 255.255.255.252
+ ip ospf network point-to-point
+ ip ospf 1 area 0
+ description "Connected-To-StandbySpine"
+
+router ospf 1
+ router-id 172.28.88.4
+ passive-interface Loopback0
+
+!Step-2: Build Overlay Network 
+
+Vlan 10
+!
+Vlan 20
+!
+Vlan 30
+!
+Vlan 40
+!
+Vlan 50
+!
+vlan 1010
+ name L3-VNI
+!
+vrf definition Data
+ rd-auto
+ !
+ address-family ipv4
+  route-target export 65535:65535
+  route-target import 65535:65535
+  route-target export 65535:65535 stitching
+  route-target import 65535:65535 stitching
+ exit-address-family
+!
+l2vpn evpn
+ replication-type ingress
+ router-id Loopback0
+!
+l2vpn evpn instance 10 vlan-based
+ encapsulation vxlan
+ replication-type ingress
+!
+l2vpn evpn instance 20 vlan-based
+ encapsulation vxlan
+ replication-type ingress
+!
+l2vpn evpn instance 30 vlan-based
+ encapsulation vxlan
+ replication-type ingress
+!
+l2vpn evpn instance 40 vlan-based
+ encapsulation vxlan
+ replication-type ingress
+!
+l2vpn evpn instance 50 vlan-based
+ encapsulation vxlan
+ replication-type ingress
+!
+!
+vlan configuration 10
+ member evpn-instance 10 vni 100010
+vlan configuration 20
+ member evpn-instance 20 vni 100020
+vlan configuration 30
+ member evpn-instance 30 vni 100030
+vlan configuration 40
+ member evpn-instance 40 vni 100040
+vlan configuration 50
+ member evpn-instance 50 vni 100050
+vlan configuration 1010
+ member vni 110010
+!
+interface Loopback1
+ vrf forwarding Data
+ ip address 172.28.84.4 255.255.255.255
+ description "Used-For-Mgmt"
+!         
+interface Vlan10
+ mac-address 0001.0001.0010
+ vrf forwarding Data
+ ip address 192.168.16.1 255.255.240.0
+ ip dhcp relay source-interface Loopback0
+ ip helper-address global 172.28.88.1
+ no autostate
+!
+interface Vlan20
+ mac-address 0001.0001.0020
+ vrf forwarding Data
+ ip address 192.168.32.1 255.255.240.0
+ ip dhcp relay source-interface Loopback0
+ ip helper-address global 172.28.88.1
+ no autostate
+!
+interface Vlan30
+ mac-address 0001.0001.0030
+ vrf forwarding Data
+ ip address 192.168.72.1 255.255.252.0
+ ip dhcp relay source-interface Loopback0
+ ip helper-address global 172.28.88.1
+ no autostate
+!
+interface Vlan40
+ mac-address 0001.0001.0040
+ vrf forwarding Data
+ ip address 192.168.64.1 255.255.252.0
+ ip dhcp relay source-interface Loopback0
+ ip helper-address global 172.28.88.1
+ no autostate
+!
+interface Vlan50
+ mac-address 0001.0001.0050
+ vrf forwarding Data
+ ip address 192.168.86.1 255.255.255.0
+ ip dhcp relay source-interface Loopback0
+ ip helper-address global 172.28.88.1
+ no autostate
+!
+interface Vlan1010
+ vrf forwarding Data
+ ip unnumbered Loopback0
+ no autostate
+ description "L3-VNI"
+!
+interface nve1
+ description "VTEP-iface-for-Encapsulation&Decapsulation-VXLAN-Pkts"
+ no ip address
+ source-interface Loopback0
+ host-reachability protocol bgp
+ member vni 100010 ingress-replication
+ member vni 100020 ingress-replication
+ member vni 100030 ingress-replication
+ member vni 100040 ingress-replication
+ member vni 100050 ingress-replication
+ member vni 110010 vrf Data
+!
+router bgp 65535
+ bgp router-id 172.28.88.4
+ bgp log-neighbor-changes
+ no bgp default ipv4-unicast
+ neighbor 172.28.88.1 remote-as 65535
+ neighbor 172.28.88.1 update-source Loopback0
+ !
+ address-family ipv4
+ exit-address-family
+ !
+ address-family l2vpn evpn
+  neighbor 172.28.88.1 activate
+  neighbor 172.28.88.1 send-community both
+ exit-address-family
+ !
+ address-family ipv4 vrf Data
+  advertise l2vpn evpn
+  redistribute connected
+ exit-address-family
+
+
+!Step-3: Informing dhcp details for option 151 (Which carry vrf informaton to DHCP Server)
+
+ip dhcp relay information option vpn
+ip dhcp relay information option
+
+!Step-4: Deny the MDNS flood traffic coming from user Macbook
+
+ip access-list extended BLOCK-5353
+ 10 permit udp any any eq 5353
+ip access-list extended PERMIT-ALL
+ 10 permit ip any any
+
+ipv6 access-list ipv6-allow-all
+ sequence 10 permit ipv6 any any
+ipv6 access-list ipv6-mdns
+ sequence 10 permit udp any any eq 5353
+
+vlan access-map BLOCK-MDNS 10
+ match ip address BLOCK-5353
+ action drop
+vlan access-map BLOCK-MDNS 15
+ match ipv6 address ipv6-mdns
+ action drop
+vlan access-map BLOCK-MDNS 20
+ match ip address PERMIT-ALL
+ action forward
+vlan access-map BLOCK-MDNS 25
+ match ipv6 address ipv6-allow-all
+ action forward
+!
+vlan filter BLOCK-MDNS vlan-list 10,20,30,40,50

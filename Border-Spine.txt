@@ -1,0 +1,182 @@
+hostname Border-Spine
+
+! Step-1:- Build Underlay (Connectivity Between Spine and Leaf with OSPF)
+! Both Spine switch(Core Swithch) are in stack
+
+interface Loopback0
+ ip address 172.28.88.1 255.255.255.255
+ ip ospf 1 area 0
+ description "Used-For-BGPNeighbor-and-NveInterface"
+
+ interface Ethernet0/1
+ no switchport
+ ip address 172.28.87.1 255.255.255.252
+ ip ospf network point-to-point
+ ip ospf 1 area 0
+ description "Connect-From-ActiveSpine-Switch-to-Leaf1-Switch"
+!
+interface Ethernet0/2
+ no switchport
+ ip address 172.28.87.9 255.255.255.252
+ ip ospf network point-to-point
+ ip ospf 1 area 0
+ description "Connect-From-ActiveSpine-Switch-to-Leaf2-Switch"
+
+interface Ethernet1/1
+ no switchport
+ ip address 172.28.87.5 255.255.255.252
+ ip ospf network point-to-point
+ ip ospf 1 area 0
+ description "Connect-From-StandbySpine-Switch-to-Leaf1-Switch"
+!
+interface Ethernet1/2
+ no switchport
+ ip address 172.28.87.13 255.255.255.252
+ ip ospf network point-to-point
+ ip ospf 1 area 0
+ description "Connect-From-StandbySpine-Switch-to-Leaf2-Switch" 
+
+router ospf 1
+ router-id 172.28.88.1
+ passive-interface Loopback0
+
+!Step-2: Build Overlay Network 
+
+Vlan 100
+ name Connectivity-To-Firewall
+
+Vlan 1010
+ name L3-VNI
+
+vrf definition Data
+ rd-auto
+ !
+ address-family ipv4
+  route-target export 65535:65535
+  route-target import 65535:65535
+  route-target export 65535:65535 stitching
+  route-target import 65535:65535 stitching
+ exit-address-family
+!
+l2vpn evpn
+ replication-type ingress
+ router-id Loopback0
+!
+l2vpn evpn instance 100 vlan-based
+ encapsulation vxlan
+ replication-type ingress
+!
+vlan configuration 100
+ member evpn-instance 100 vni 100100
+ 
+vlan configuration 1010
+ member vni 110010
+!
+interface Loopback1
+ vrf forwarding Data
+ ip address 172.28.84.1 255.255.255.255
+ description "RemoteAccess-For-Mgmt"
+!
+interface Ethernet0/0
+ switchport access vlan 100
+ switchport mode access
+ spanning-tree portfast
+ description "Connect-From-ActiveSpine-To-PrimaryFirewall"
+ 
+interface Ethernet1/0
+ switchport access vlan 100
+ switchport mode access
+ spanning-tree portfast
+ description "Connect-From-StandbySpine-To-SecondaryFirewall"
+!
+interface Vlan100
+ vrf forwarding Data
+ ip address 172.28.85.2 255.255.255.252
+ no autostate
+ description "Connectivity-To-Firewall-and-Learn-DefaultRoutes"
+!
+interface Vlan1010
+ vrf forwarding Data
+ ip unnumbered Loopback0
+ no autostate
+ description "L3-VNI"
+!
+interface nve1
+ description "VTEP-iface-for-Encapsulation&Decapsulation-VXLAN-Pkts"
+ no ip address
+ source-interface Loopback0
+ host-reachability protocol bgp
+ member vni 110010 vrf Data
+ member vni 100100 ingress-replication
+!
+!Static routing toward Firewall
+ip route vrf Data 0.0.0.0 0.0.0.0 172.28.85.1
+!
+router bgp 65535
+ template peer-policy Leaf
+  route-reflector-client
+  send-community both
+ exit-peer-policy
+ !
+ bgp router-id 172.28.88.1
+ bgp log-neighbor-changes
+ no bgp default ipv4-unicast
+ neighbor 172.28.88.3 remote-as 65535
+ neighbor 172.28.88.3 update-source Loopback0
+ neighbor 172.28.88.4 remote-as 65535
+ neighbor 172.28.88.4 update-source Loopback0
+ !
+ address-family ipv4
+ exit-address-family
+ !
+ address-family l2vpn evpn
+  neighbor 172.28.88.3 activate
+  neighbor 172.28.88.3 send-community extended
+  neighbor 172.28.88.3 inherit peer-policy Leaf
+  neighbor 172.28.88.4 activate
+  neighbor 172.28.88.4 send-community extended
+  neighbor 172.28.88.4 inherit peer-policy Leaf
+ exit-address-family
+ !
+ address-family ipv4 vrf Data
+  advertise l2vpn evpn
+  redistribute connected
+  redistribute static
+  default-information originate
+ exit-address-family
+
+!Step-3:Creating DHCP Pool Config for AP and Clinets
+
+ip dhcp relay information trust-all
+ip dhcp excluded-address vrf Data 192.168.16.1 192.168.16.50
+ip dhcp excluded-address vrf Data 192.168.32.1 192.168.32.50
+ip dhcp excluded-address vrf Data 192.168.72.1 192.168.72.25
+ip dhcp excluded-address vrf Data 192.168.64.1 192.168.64.50
+ip dhcp excluded-address vrf Data 192.168.86.1 192.168.86.20
+!
+ip dhcp pool vlan10
+ vrf Data
+ network 192.168.16.0 255.255.240.0
+ default-router 192.168.16.1 
+!
+ip dhcp pool vlan20
+ vrf Data 
+ network 192.168.32.0 255.255.240.0
+ default-router 192.168.32.1 
+!
+ip dhcp pool vlan30
+ vrf Data
+ network 192.168.72.0 255.255.252.0
+ default-router 192.168.72.1 
+!
+ip dhcp pool vlan40
+ vrf Data 
+ network 192.168.64.0 255.255.252.0
+ default-router 192.168.64.1 
+ !
+ip dhcp pool vlan50
+  vrf Data 
+  network 192.168.86.0 255.255.255.0
+  default-router 192.168.86.1 
+
+  
